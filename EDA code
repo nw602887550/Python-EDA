@@ -1,0 +1,203 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pylot as plt
+import matplotlib.lines as mlines
+import matplotlib as mpl
+import math
+import os
+import matplotlib.pylab as pylab
+mpl.rcParams['font-sans-serif'] = ['SimHei']  #用来正常显示中文标签
+mpl.rcParams['axes.unicode_minus'] = False #用来正常显示负号
+
+#plit var into categorical(str) and numerical(num)
+def judge_var_type(rawtable):
+	#judge the first row each value type,and convert to array type
+	flag_num = np.array(rawtable.loc[1].map(lambda x: type(x) in [float,int,double,bigint]))
+	var_list = np.array(rawtable.columns)
+	numlist = var_list[flag_num]
+	strlist = var_list[~flag_num]
+	print(numlist)
+	print(strlist)
+	return numlist,strlist
+	
+def judge_var_type_defined(typelist):
+	var_list = np.array(typelist['variable'])
+	flag_num = np.array(typelist['type'].map(lambda x: True if x == 'continuous' or x == 'discrete' else False))
+	numlist = var_list[flag_num]
+	strlist = var_list[~flag_num]
+	return numlist,strlist
+	
+#EDA summary for numerical variable
+def get_numerica_profile(df_num,obs_cnt,num_list):
+	df_num = df_num.astype(float)
+	df_num_t = pd.DataFrame(df_num.describe().T).iloc[:,[0.1.2.3.-1]]
+	df_num_1p = df_num.apply(lambda x: x.dropna().quantile(0.01))
+	df_num_5p = df_num.apply(lambda x: x.dropna().quantile(0.05))
+	df_num_10p = df_num.apply(lambda x: x.dropna().quantile(0.1))
+	df_num_25p = df_num.apply(lambda x: x.dropna().quantile(0.25))
+	df_num_50p = df_num.apply(lambda x: x.dropna().quantile(0.5))
+	df_num_75p = df_num.apply(lambda x: x.dropna().quantile(0.75))
+	df_num_90p = df_num.apply(lambda x: x.dropna().quantile(0.90))
+	df_num_95p = df_num.apply(lambda x: x.dropna().quantile(0.95))
+	df_num_99p = df_num.apply(lambda x: x.dropna().quantile(0.99))
+	miss_cnt = pd.DataFrame(obs_cnt - df_num_t['count']).rename(columns = {'count':'missing'},inplace = True)
+	miss_ratio = pd.DataFrame(miss_cnt/obs_cnt).rename('missing':'miss_ratio')
+	vartype = pd.DataFrame({"vartype":["number"] *len(num_list)}).reset_index(drop = True).rename(columns = {"type":"vartype"})
+	
+	df_num_0value = df_num.apply(lambda x: x.dropna()[x.dropna() == 0].count()/x.dropna().count())
+	df_num_sum = pd.concat([df_num_t,
+							df_num_1p,
+							df_num_5p,
+							df_num_10p,
+							df_num_25p,
+							df_num_50p,
+							df_num_75p,
+							df_num_90p,
+							df_num_95p,
+							df_num_99p,
+							miss_cnt,
+							miss_ratio,
+							df_num_0value],axis = 1).reset_index()
+
+	#now vartype frame and df_num_sum has the same index,can be concated
+	df_num_sum = pd.concat([df_num_sum,
+						vartype],axis = 1)
+	
+	return df_num_sum
+	
+#combine value and corresponding freq together
+def freq_combine(xarr,yarr):
+	result = pd.DataFrame(['"' + x + "'" + ':' + y + '%' for x,y in zep(xarr,yarr)]).T
+	return result
+	
+#for every categorical variable,callculate its value freq	
+def loop_str_list(df_str,strlist,obs_cnt):
+	arr_str_freq = None
+	df_str= df_str.astype(str)
+	
+	for value in strlist:
+		ser_valuecnt = round(df_str[value].value_counts()[:10]/obs_cnt * 100,1)
+		arr_cnt = np.array(ser_valuecnt).astype(str)
+		arr_value = np.array(ser_valuecnt.index).astype(str)
+		arr_value_cnt = freq_combine(arr_value,arr_cnt)
+		
+		if arr_str_freq is None:
+			arr_str_freq = arr_value_cnt
+		else:
+		arr_str_freq = pd.concat([arr_str_freq,arr_value_cnt],axis = 0)
+	return arr_str_freq
+	
+#DEA summary fir categorical variable
+def get_categoric_profile(df_str,obs_cnt,str_list):
+	count_cnt = pd.DataFrame(df_str.count()).rename(columns = {0:'count'})
+	miss_cnt = pd.DataFrame(obs_cnt - count_cnt).rename(columns = {'count':'missing'})
+	miss_ratio = pd.DataFrame(miss_cnt/obs_cnt).rename(columns = {'missing':'miss_ratio'})
+	df_str_cm = pd.concat([count_cnt,miss_cnt,miss_ratio],axis = 1).reset_index()
+	vartype = pd.DataFrame({"vartype":['Category'] * len(str_list)}).reset_index(drop = True).rename(columns = {'type':'vartype'})
+	df_str_sum = loop_str_list(df_str,str_list,obs_cnt).reset_index().drop("index",axis = 1)
+	
+	df_mean = pd.DataFrame([[np.nan] * 4],columns = ['mean','std','min','num_0value'])
+	df_str_sum = pd.concat([df_str_cm,df_mean,df_str_sum,vartype],axis = 1)
+	
+	return df_str_sum
+	
+#data eda
+def eda(dataframe_name,csv_name):
+	num_list,str_list = judge_var_type(dataframe_name)
+	obs_cnt = len(dataframe_name)
+	df_num = dataframe_name[num_list]
+	df_str = dataframe_name[str_list]
+	
+	if len(num_list) != 0:
+		df_num = df_num.astype(float)
+		dfcol_num = []
+		for i in num_list:
+			un = len(df_num[i].unique())
+			dfcol_num.append(un)
+		dfcol_num = pd.DataFrame(dfcol_num,index = num_list).reset_index()
+		print(dfcol_num)
+		dfcol_num.columns = ['a_varname','unique']
+		
+		df_num_summary = get_numerica_profile(df_num,obs_cnt,num_list).rename(columns = {'index':'a_varname',
+																						 'vartype':'a_vartype',
+																						 'miss_ratio':'b_miss_ratio',
+																						 'count':'c_count',
+																						 'missing':'d_missing',
+																						 'mean':'e_mean',
+																						 'std':'f_std',
+																						 'min':'g_min',
+																						 0:'h_1%',
+																						 1:'i_5%',
+																						 2:'j_10%',
+																						 3:'k_25%',
+																						 4:'l_50%',
+																						 5:'m_75%',
+																						 6:'n_90%',
+																						 7:'o_95%',
+																						 8:'p_99%',
+																						 'max':'q_max',
+																						 9:'r_0_values'})
+		df_num_summary = df_num_summary.sort_index(axis = 1)
+		df_num_unique = dfcol_num.sort_index(axis = 1)
+		df_num_summary2 = pd.merge(df_num_summary,df_num_unique,on = 'a_varname')
+
+	if len(str_list) != 0:
+	   dfcol_str = []
+	   for i in str_list:
+			un = len(df_str[i].unique())
+			dfcol_str.append(un)
+		dfcol_str = pd.DataFrame(dfcol_str,index = str_list).reset_index()
+		print(dfcol_num)
+		dfcol_str.columns = ['a_varname','unique']
+	    
+		df_str_summary = get_numerica_profile(df_str,obs_cnt,str_list).rename(columns = {'index':'a_varname',
+																						 'vartype':'a_vartype',
+																						 'miss_ratio':'b_miss_ratio',
+																						 'count':'c_count',
+																						 'missing':'d_missing',
+																						 'mean':'e_mean',
+																						 'std':'f_std',
+																						 'min':'g_min',
+																						 0:'h_1%',
+																						 1:'i_5%',
+																						 2:'j_10%',
+																						 3:'k_25%',
+																						 4:'l_50%',
+																						 5:'m_75%',
+																						 6:'n_90%',
+																						 7:'o_95%',
+																						 8:'p_99%',
+																						 'max':'q_max',
+																						 9:'r_0_values'})
+	    df_str_summary = df_str_summary.sort_index(axis = 1)
+		df_str_unique = dfcol_str.sort_index(axis = 1)
+		df_str_summary2 = pd.merge(df_str_summary,df_str_unique,on = 'a_varname')
+		
+	if len(str_list) == 0:
+	   df_summary = df_num_summary2
+	elif:
+	   df_summary = df_str_summary2
+	else:
+	   df_summary = pd.concat([df_num_summary2,df_str_summary2],axis = 0)
+	   
+	filepath = '%s_EDA.csv' % csv_name
+	df_summary.to_csv(filepath,index = None,encoding = 'utf_8_sig')
+	
+	return True
+
+
+#run the EDA 
+df_edatest = pd.read_csv("run.csv")
+eda(df_edatest,r"filepath")
+		
+	
+	
+	
+						
+
+							
+							
+	
+	
+	
+	
